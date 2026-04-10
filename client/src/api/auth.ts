@@ -1,0 +1,13 @@
+import apiClient from './client';
+import type { AuthTokens, LoginRequest, SignupRequest, User } from '../types';
+
+export const authApi = {
+  signup: (data: SignupRequest) =>
+    apiClient.post<User>('/auth/signup', data),
+
+  login: (data: LoginRequest) =>
+    apiClient.post<AuthTokens>('/auth/login', data),
+
+  refresh: (refreshToken: string) =>
+    apiClient.post<{ accessToken: string }>('/auth/refresh', { refreshToken }),
+};

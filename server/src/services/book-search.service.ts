@@ -1,0 +1,82 @@
+import axios from 'axios';
+
+export interface BookSearchResult {
+  title: string;
+  author: string;
+  coverImageUrl: string;
+  summary: string;
+  isbn: string;
+}
+
+function parseKakaoResponse(data: any): BookSearchResult[] {
+  if (!data?.documents || !Array.isArray(data.documents)) {
+    return [];
+  }
+  return data.documents.map((doc: any) => ({
+    title: doc.title ?? '',
+    author: (doc.authors ?? []).join(', '),
+    coverImageUrl: doc.thumbnail ?? '',
+    summary: doc.contents ?? '',
+    isbn: doc.isbn?.split(' ').pop() ?? '',
+  }));
+}
+
+function parseNaverResponse(data: any): BookSearchResult[] {
+  if (!data?.items || !Array.isArray(data.items)) {
+    return [];
+  }
+  return data.items.map((item: any) => ({
+    title: (item.title ?? '').replace(/<[^>]*>/g, ''),
+    author: (item.author ?? '').replace(/<[^>]*>/g, ''),
+    coverImageUrl: item.image ?? '',
+    summary: (item.description ?? '').replace(/<[^>]*>/g, ''),
+    isbn: item.isbn ?? '',
+  }));
+}
+
+export const bookSearchService = {
+  async search(query: string): Promise<BookSearchResult[]> {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+
+    // Read env vars at call time (after dotenv has loaded)
+    const kakaoKey = process.env.KAKAO_API_KEY;
+    const naverClientId = process.env.NAVER_CLIENT_ID;
+    const naverClientSecret = process.env.NAVER_CLIENT_SECRET;
+
+    // Try Kakao API first
+    if (kakaoKey && !kakaoKey.startsWith('your-')) {
+      try {
+        const response = await axios.get('https://dapi.kakao.com/v3/search/book', {
+          params: { query, size: 10 },
+          headers: { Authorization: `KakaoAK ${kakaoKey}` },
+          timeout: 5000,
+        });
+        return parseKakaoResponse(response.data);
+      } catch {
+        // Fall through to Naver
+      }
+    }
+
+    // Try Naver API as fallback
+    if (naverClientId && naverClientSecret && !naverClientId.startsWith('your-')) {
+      try {
+        const response = await axios.get('https://openapi.naver.com/v1/search/book.json', {
+          params: { query, display: 10 },
+          headers: {
+            'X-Naver-Client-Id': naverClientId,
+            'X-Naver-Client-Secret': naverClientSecret,
+          },
+          timeout: 5000,
+        });
+        return parseNaverResponse(response.data);
+      } catch {
+        // Fall through
+      }
+    }
+
+    // No valid API keys configured — return empty so frontend falls back to manual input
+    return [];
+  },
+};

@@ -1,0 +1,326 @@
+import { Prisma, PrismaClient } from '@prisma/client';
+import { AppError } from './auth.service';
+import { CreateGroupInput, UpdateGroupInput } from '../validators';
+
+const prisma = new PrismaClient();
+
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+export const groupService = {
+  async create(data: CreateGroupInput, userId: string) {
+    // Find or create the Book entity
+    let bookId = data.bookId;
+
+    if (!bookId) {
+      const book = await prisma.book.create({
+        data: {
+          title: data.bookTitle,
+          author: data.bookAuthor ?? null,
+          coverImageUrl: data.bookCoverUrl ?? null,
+          summary: data.bookSummary ?? null,
+        },
+      });
+      bookId = book.id;
+    } else {
+      const existing = await prisma.book.findUnique({ where: { id: bookId } });
+      if (!existing) {
+        const book = await prisma.book.create({
+          data: {
+            title: data.bookTitle,
+            author: data.bookAuthor ?? null,
+            coverImageUrl: data.bookCoverUrl ?? null,
+            summary: data.bookSummary ?? null,
+          },
+        });
+        bookId = book.id;
+      }
+    }
+
+    // Create group and owner membership in a transaction
+    const group = await prisma.$transaction(async (tx: TransactionClient) => {
+      const created = await tx.group.create({
+        data: {
+          bookId,
+          ownerId: userId,
+          name: data.name,
+          description: data.description ?? null,
+          maxMembers: data.maxMembers,
+          readingStartDate: new Date(data.readingStartDate),
+          readingEndDate: new Date(data.readingEndDate),
+          discussionDate: new Date(data.discussionDate),
+        },
+        include: { book: true },
+      });
+
+      // Auto-register owner as first member
+      await tx.groupMember.create({
+        data: {
+          groupId: created.id,
+          userId,
+          role: 'owner',
+        },
+      });
+
+      return created;
+    });
+
+    return group;
+  },
+
+  async list(query?: { search?: string; page?: number; limit?: number }) {
+    const page = query?.page ?? 1;
+    const limit = query?.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query?.search) {
+      where.book = {
+        title: { contains: query.search },
+      };
+    }
+
+    const [groups, total] = await Promise.all([
+      prisma.group.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          book: true,
+          _count: { select: { members: true } },
+        },
+      }),
+      prisma.group.count({ where }),
+    ]);
+
+    const items = groups.map((g: typeof groups[number]) => ({
+      id: g.id,
+      name: g.name,
+      description: g.description,
+      maxMembers: g.maxMembers,
+      readingStartDate: g.readingStartDate,
+      readingEndDate: g.readingEndDate,
+      discussionDate: g.discussionDate,
+      createdAt: g.createdAt,
+      memberCount: g._count.members,
+      book: {
+        id: g.book.id,
+        title: g.book.title,
+        author: g.book.author,
+        coverImageUrl: g.book.coverImageUrl,
+        summary: g.book.summary,
+      },
+    }));
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  },
+
+  async getDetail(groupId: string, userId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: {
+        book: true,
+        owner: { select: { id: true, nickname: true, email: true } },
+        members: {
+          include: {
+            user: { select: { id: true, nickname: true, email: true } },
+          },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new AppError(404, 'NOT_FOUND', '모임을 찾을 수 없습니다');
+    }
+
+    // Check if user is a member
+    const isMember = group.members.some((m: typeof group.members[number]) => m.userId === userId);
+
+    // Get recent memos and discussions summary if user is a member
+    let recentMemos: any[] = [];
+    let recentDiscussions: any[] = [];
+
+    if (isMember) {
+      recentMemos = await prisma.memo.findMany({
+        where: { groupId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          user: { select: { id: true, nickname: true } },
+        },
+      });
+
+      recentDiscussions = await prisma.discussion.findMany({
+        where: { groupId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          author: { select: { id: true, nickname: true } },
+        },
+      });
+    }
+
+    return {
+      id: group.id,
+      name: group.name,
+      description: group.description,
+      maxMembers: group.maxMembers,
+      readingStartDate: group.readingStartDate,
+      readingEndDate: group.readingEndDate,
+      discussionDate: group.discussionDate,
+      createdAt: group.createdAt,
+      ownerId: group.ownerId,
+      book: {
+        id: group.book.id,
+        title: group.book.title,
+        author: group.book.author,
+        coverImageUrl: group.book.coverImageUrl,
+        summary: group.book.summary,
+      },
+      owner: group.owner,
+      members: group.members.map((m: typeof group.members[number]) => ({
+        id: m.id,
+        userId: m.user.id,
+        nickname: m.user.nickname,
+        role: m.role,
+        readingProgress: m.readingProgress,
+        joinedAt: m.joinedAt,
+      })),
+      isMember,
+      memberCount: group.members.length,
+      recentMemos: recentMemos.map((m) => ({
+        id: m.id,
+        content: m.content.substring(0, 100),
+        pageStart: m.pageStart,
+        pageEnd: m.pageEnd,
+        isPublic: m.isPublic,
+        authorNickname: m.user.nickname,
+        createdAt: m.createdAt,
+      })),
+      recentDiscussions: recentDiscussions.map((d) => ({
+        id: d.id,
+        title: d.title,
+        authorNickname: d.author.nickname,
+        createdAt: d.createdAt,
+      })),
+    };
+  },
+
+  async join(groupId: string, userId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { _count: { select: { members: true } } },
+    });
+
+    if (!group) {
+      throw new AppError(404, 'NOT_FOUND', '모임을 찾을 수 없습니다');
+    }
+
+    // Check duplicate membership
+    const existingMember = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+
+    if (existingMember) {
+      throw new AppError(409, 'ALREADY_JOINED', '이미 참여 중인 모임입니다');
+    }
+
+    // Check capacity
+    if (group._count.members >= group.maxMembers) {
+      throw new AppError(409, 'GROUP_FULL', '모집 인원이 마감되었습니다');
+    }
+
+    await prisma.groupMember.create({
+      data: {
+        groupId,
+        userId,
+        role: 'member',
+      },
+    });
+  },
+
+  async update(groupId: string, userId: string, data: UpdateGroupInput) {
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) {
+      throw new AppError(404, 'NOT_FOUND', '모임을 찾을 수 없습니다');
+    }
+    if (group.ownerId !== userId) {
+      throw new AppError(403, 'FORBIDDEN', '방장만 모임을 수정할 수 있습니다');
+    }
+
+    const updateData: any = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.maxMembers !== undefined) updateData.maxMembers = data.maxMembers;
+    if (data.readingStartDate !== undefined) updateData.readingStartDate = new Date(data.readingStartDate);
+    if (data.readingEndDate !== undefined) updateData.readingEndDate = new Date(data.readingEndDate);
+    if (data.discussionDate !== undefined) updateData.discussionDate = new Date(data.discussionDate);
+
+    return prisma.group.update({
+      where: { id: groupId },
+      data: updateData,
+      include: { book: true },
+    });
+  },
+
+  async updateProgress(groupId: string, userId: string, readingProgress: number) {
+    const member = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+    if (!member) {
+      throw new AppError(403, 'FORBIDDEN', '모임 참여자만 진행률을 업데이트할 수 있습니다');
+    }
+    return prisma.groupMember.update({
+      where: { groupId_userId: { groupId, userId } },
+      data: { readingProgress },
+    });
+  },
+
+  async delete(groupId: string, userId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { _count: { select: { members: true } } },
+    });
+    if (!group) {
+      throw new AppError(404, 'NOT_FOUND', '모임을 찾을 수 없습니다');
+    }
+    if (group.ownerId !== userId) {
+      throw new AppError(403, 'FORBIDDEN', '방장만 모임을 삭제할 수 있습니다');
+    }
+    // 방장 포함 1명(본인)만 있을 때만 삭제 가능
+    if (group._count.members > 1) {
+      throw new AppError(409, 'GROUP_HAS_MEMBERS', '참여자가 있는 모임은 삭제할 수 없습니다');
+    }
+
+    // 연관 데이터 삭제 (순서 중요: FK 의존성)
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.reply.deleteMany({ where: { comment: { discussion: { groupId } } } });
+      await tx.comment.deleteMany({ where: { discussion: { groupId } } });
+      await tx.discussion.deleteMany({ where: { groupId } });
+      await tx.memo.deleteMany({ where: { groupId } });
+      await tx.groupMember.deleteMany({ where: { groupId } });
+      await tx.group.delete({ where: { id: groupId } });
+    });
+  },
+
+  async leave(groupId: string, userId: string) {
+    const member = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+    if (!member) {
+      throw new AppError(404, 'NOT_FOUND', '참여 중인 모임이 아닙니다');
+    }
+    if (member.role === 'owner') {
+      throw new AppError(403, 'FORBIDDEN', '방장은 모임을 나갈 수 없습니다. 모임 삭제를 이용해주세요.');
+    }
+    await prisma.groupMember.delete({
+      where: { groupId_userId: { groupId, userId } },
+    });
+  },
+};

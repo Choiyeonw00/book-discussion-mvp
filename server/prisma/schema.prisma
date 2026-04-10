@@ -1,0 +1,141 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  nickname     String   @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  groupMembers GroupMember[]
+  memos        Memo[]
+  discussions  Discussion[]
+  comments     Comment[]
+  replies      Reply[]
+  ownedGroups  Group[]      @relation("GroupOwner")
+
+  @@map("users")
+}
+
+model Book {
+  id            String   @id @default(uuid())
+  title         String   @db.VarChar(255)
+  author        String?  @db.VarChar(255)
+  coverImageUrl String?  @map("cover_image_url") @db.Text
+  summary       String?  @db.Text
+  isbn          String?  @db.VarChar(20)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  groups Group[]
+
+  @@map("books")
+}
+
+model Group {
+  id               String   @id @default(uuid())
+  bookId           String   @map("book_id")
+  ownerId          String   @map("owner_id")
+  name             String   @db.VarChar(100)
+  description      String?  @db.Text
+  maxMembers       Int      @map("max_members")
+  readingStartDate DateTime @map("reading_start_date") @db.Date
+  readingEndDate   DateTime @map("reading_end_date") @db.Date
+  discussionDate   DateTime @map("discussion_date") @db.Date
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  book        Book          @relation(fields: [bookId], references: [id])
+  owner       User          @relation("GroupOwner", fields: [ownerId], references: [id])
+  members     GroupMember[]
+  memos       Memo[]
+  discussions Discussion[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id              String   @id @default(uuid())
+  groupId         String   @map("group_id")
+  userId          String   @map("user_id")
+  readingProgress Int      @default(0) @map("reading_progress")
+  role            String   @default("member") @db.VarChar(20)
+  joinedAt        DateTime @default(now()) @map("joined_at")
+
+  group Group @relation(fields: [groupId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+model Memo {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  userId    String   @map("user_id")
+  pageStart Int      @map("page_start")
+  pageEnd   Int      @map("page_end")
+  content   String   @db.Text
+  isPublic  Boolean  @default(false) @map("is_public")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  group       Group        @relation(fields: [groupId], references: [id])
+  user        User         @relation(fields: [userId], references: [id])
+  discussions Discussion[]
+
+  @@map("memos")
+}
+
+model Discussion {
+  id            String   @id @default(uuid())
+  groupId       String   @map("group_id")
+  authorId      String   @map("author_id")
+  memoId        String?  @map("memo_id")
+  title         String   @db.VarChar(200)
+  content       String?  @db.Text
+  isRecommended Boolean  @default(false) @map("is_recommended")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  group    Group     @relation(fields: [groupId], references: [id])
+  author   User      @relation(fields: [authorId], references: [id])
+  memo     Memo?     @relation(fields: [memoId], references: [id])
+  comments Comment[]
+
+  @@map("discussions")
+}
+
+model Comment {
+  id           String   @id @default(uuid())
+  discussionId String   @map("discussion_id")
+  authorId     String   @map("author_id")
+  content      String   @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  discussion Discussion @relation(fields: [discussionId], references: [id])
+  author     User       @relation(fields: [authorId], references: [id])
+  replies    Reply[]
+
+  @@map("comments")
+}
+
+model Reply {
+  id        String   @id @default(uuid())
+  commentId String   @map("comment_id")
+  authorId  String   @map("author_id")
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  comment Comment @relation(fields: [commentId], references: [id])
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@map("replies")
+}

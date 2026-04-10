@@ -1,0 +1,209 @@
+import { useState, type FormEvent } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { authApi } from '../api/auth';
+import type { ApiError } from '../types';
+import { AxiosError } from 'axios';
+
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    backgroundColor: '#f5f5f5',
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 32,
+    width: 400,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 700,
+    textAlign: 'center' as const,
+    marginBottom: 24,
+  },
+  field: {
+    marginBottom: 16,
+  },
+  label: {
+    display: 'block',
+    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: 500,
+  },
+  input: {
+    width: '100%',
+    padding: '10px 12px',
+    fontSize: 14,
+    border: '1px solid #ddd',
+    borderRadius: 4,
+    boxSizing: 'border-box' as const,
+  },
+  inputError: {
+    borderColor: '#e53e3e',
+  },
+  errorText: {
+    color: '#e53e3e',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  serverError: {
+    backgroundColor: '#fff5f5',
+    color: '#e53e3e',
+    padding: '10px 12px',
+    borderRadius: 4,
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center' as const,
+  },
+  button: {
+    width: '100%',
+    padding: '12px 0',
+    backgroundColor: '#3182ce',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 4,
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: 'pointer',
+    marginTop: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed',
+  },
+  link: {
+    display: 'block',
+    textAlign: 'center' as const,
+    marginTop: 16,
+    fontSize: 14,
+    color: '#3182ce',
+  },
+};
+
+interface FormErrors {
+  email?: string;
+  password?: string;
+  nickname?: string;
+}
+
+function validateForm(email: string, password: string, nickname: string): FormErrors {
+  const errors: FormErrors = {};
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!email.trim()) {
+    errors.email = '이메일을 입력해주세요';
+  } else if (!emailRegex.test(email)) {
+    errors.email = '올바른 이메일 형식이 아닙니다';
+  }
+
+  if (!password) {
+    errors.password = '비밀번호를 입력해주세요';
+  } else if (password.length < 8) {
+    errors.password = '비밀번호는 8자 이상이어야 합니다';
+  }
+
+  if (!nickname.trim()) {
+    errors.nickname = '닉네임을 입력해주세요';
+  }
+
+  return errors;
+}
+
+function SignupPage() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [serverError, setServerError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setServerError('');
+
+    const formErrors = validateForm(email, password, nickname);
+    setErrors(formErrors);
+    if (Object.keys(formErrors).length > 0) return;
+
+    setLoading(true);
+    try {
+      await authApi.signup({ email, password, nickname });
+      navigate('/login');
+    } catch (err) {
+      const axiosErr = err as AxiosError<ApiError>;
+      const msg = axiosErr.response?.data?.error?.message || '회원가입에 실패했습니다';
+      setServerError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.card}>
+        <h1 style={styles.title}>회원가입</h1>
+        <form onSubmit={handleSubmit} noValidate>
+          {serverError && <div style={styles.serverError}>{serverError}</div>}
+
+          <div style={styles.field}>
+            <label style={styles.label} htmlFor="email">이메일</label>
+            <input
+              id="email"
+              type="email"
+              style={{ ...styles.input, ...(errors.email ? styles.inputError : {}) }}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@email.com"
+            />
+            {errors.email && <div style={styles.errorText}>{errors.email}</div>}
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label} htmlFor="password">비밀번호</label>
+            <input
+              id="password"
+              type="password"
+              style={{ ...styles.input, ...(errors.password ? styles.inputError : {}) }}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="8자 이상"
+            />
+            {errors.password && <div style={styles.errorText}>{errors.password}</div>}
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label} htmlFor="nickname">닉네임</label>
+            <input
+              id="nickname"
+              type="text"
+              style={{ ...styles.input, ...(errors.nickname ? styles.inputError : {}) }}
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              placeholder="닉네임"
+            />
+            {errors.nickname && <div style={styles.errorText}>{errors.nickname}</div>}
+          </div>
+
+          <button
+            type="submit"
+            style={{ ...styles.button, ...(loading ? styles.buttonDisabled : {}) }}
+            disabled={loading}
+          >
+            {loading ? '가입 중...' : '회원가입'}
+          </button>
+        </form>
+
+        <Link to="/login" style={styles.link}>
+          이미 계정이 있으신가요? 로그인
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+export default SignupPage;

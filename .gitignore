@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+client/dist/
+
+# Environment variables (민감 정보)
+.env
+server/.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+server/prisma/migrations/
+
+# Logs
+*.log
+
+# Test coverage
+coverage/
