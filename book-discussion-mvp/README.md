@@ -27,7 +27,7 @@
 ## 프로젝트 구조
 
 ```
-memo-api/
+book-discussion-mvp/
 ├── server.js            # Express 서버 진입점
 ├── routes/
 │   └── group.js         # 모임 / 참여 / 주제 / 댓글 / 메모 API
@@ -39,7 +39,7 @@ memo-api/
 ## 실행 방법
 
 ```bash
-cd memo-api
+cd book-discussion-mvp
 npm install
 npm start
 ```
